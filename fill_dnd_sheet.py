@@ -92,6 +92,15 @@ def extract_character_info(data):
         'charisma': 'ST Charisma'
     }
     
+    save_checkbox_mapping = {
+        'strength': 'Check Box 11',
+        'dexterity': 'Check Box 18',
+        'constitution': 'Check Box 19',
+        'intelligence': 'Check Box 20',
+        'wisdom': 'Check Box 21',
+        'charisma': 'Check Box 22'
+    }
+    
     for ability, save_field in save_mapping.items():
         ability_data = data.get(ability, {})
         has_save = ability_data.get('save', False)
@@ -100,6 +109,9 @@ def extract_character_info(data):
         
         if has_save:
             modifier += prof_bonus
+            # Mark the checkbox
+            if ability in save_checkbox_mapping:
+                char_info[save_checkbox_mapping[ability]] = 'Yes'
         
         char_info[save_field] = f"+{modifier}" if modifier >= 0 else str(modifier)
     
@@ -126,6 +138,27 @@ def extract_character_info(data):
         'SURVIVAL': ('Survival', 'wisdom')
     }
     
+    skill_checkbox_mapping = {
+        'ACROBATICS': 'Check Box 23',
+        'ANIMAL_HANDLING': 'Check Box 24',
+        'ARCANA': 'Check Box 25',
+        'ATHLETICS': 'Check Box 26',
+        'DECEPTION': 'Check Box 27',
+        'HISTORY': 'Check Box 28',
+        'INSIGHT': 'Check Box 29',
+        'INTIMIDATION': 'Check Box 30',
+        'INVESTIGATION': 'Check Box 31',
+        'MEDICINE': 'Check Box 32',
+        'NATURE': 'Check Box 33',
+        'PERCEPTION': 'Check Box 34',
+        'PERFORMANCE': 'Check Box 35',
+        'PERSUASION': 'Check Box 36',
+        'RELIGION': 'Check Box 37',
+        'SLEIGHT_OF_HAND': 'Check Box 38',
+        'STEALTH': 'Check Box 39',
+        'SURVIVAL': 'Check Box 40'
+    }
+    
     for skill in skills:
         skill_type = skill.get('typeName', '')
         proficiency = skill.get('proficiencyName', 'NONE')
@@ -137,8 +170,12 @@ def extract_character_info(data):
             
             if proficiency == 'FULL':
                 modifier += prof_bonus
+                if skill_type in skill_checkbox_mapping:
+                     char_info[skill_checkbox_mapping[skill_type]] = 'Yes'
             elif proficiency == 'EXPERT':
                 modifier += prof_bonus * 2
+                if skill_type in skill_checkbox_mapping:
+                     char_info[skill_checkbox_mapping[skill_type]] = 'Yes'
             
             char_info[skill_name] = f"+{modifier}" if modifier >= 0 else str(modifier)
     
@@ -292,13 +329,20 @@ def fill_pdf(template_path, output_path, field_data):
                             # Stima dimensione font (60% dell'altezza, max 10pt)
                             font_size = min(height * 0.6, 10)
                             
-                            # Posiziona il testo (leggermente sopra il fondo)
-                            text_x = x1 + 2
-                            text_y = y1 + (height - font_size) / 2 + 1
-                            
-                            # Imposta font e disegna
-                            c.setFont("Helvetica", font_size)
-                            c.drawString(text_x, text_y, text_to_draw)
+                            # Posiziona il testo
+                            if field_name.startswith("Check Box"):
+                                # Per i checkbox, disegna un pallino pieno centrato
+                                c.setFont("Helvetica", 12)  # Dimensione fissa per il pallino
+                                text_width = c.stringWidth("•", "Helvetica", 12)
+                                text_x = x1 + (width - text_width) / 2
+                                text_y = y1 + (height - 12) / 2 + 2 # Aggiustamento verticale
+                                c.drawString(text_x, text_y, "•")
+                            else:
+                                # Per i campi di testo normali
+                                text_x = x1 + 2
+                                text_y = y1 + (height - font_size) / 2 + 1
+                                c.setFont("Helvetica", font_size)
+                                c.drawString(text_x, text_y, text_to_draw)
         
         # Passa alla prossima pagina nel canvas ReportLab
         c.showPage()
