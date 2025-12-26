@@ -1,11 +1,49 @@
-import json
 import sys
-from pathlib import Path
-from PyPDF2 import PdfReader, PdfWriter
-from PyPDF2.generic import NameObject, BooleanObject, DictionaryObject
-import io
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
+import traceback
+import ctypes
+
+def show_error_box(title, message):
+    """Mostra un messaggio di errore nativo Windows"""
+    try:
+        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10) # 0x10 = MB_ICONERROR
+    except:
+        pass
+
+# Global Exception Hook
+def global_exception_handler(exctype, value, tb):
+    err_msg = "".join(traceback.format_exception(exctype, value, tb))
+    with open("crash_log.txt", "w") as f:
+        f.write(err_msg)
+    show_error_box("Errore Critico", f"L'applicazione ha riscontrato un errore:\n\n{err_msg}\n\nLog salvato in crash_log.txt")
+    sys.exit(1)
+
+sys.excepthook = global_exception_handler
+
+try:
+    import json
+    import os
+    from pathlib import Path
+    # Usa pypdf invece di PyPDF2 (più moderno e compatibile)
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import NameObject, BooleanObject, DictionaryObject
+    import io
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import letter
+
+    # GUI Imports
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+    import threading
+
+except Exception as e:
+    # Catch import errors
+    global_exception_handler(type(e), e, e.__traceback__)
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(relative_path)
 
 def load_character_data(cah_file):
     """Carica i dati del personaggio dal file .cah (JSON)"""
@@ -301,7 +339,7 @@ def fill_pdf(template_path, output_path, field_data):
     
     reader = PdfReader(template_path)
     
-    print("Generazione overlay testo...")
+    # print("Generazione overlay testo...")
     
     # Itera su ogni pagina del template per trovare i campi e le loro coordinate
     for page_num, page in enumerate(reader.pages):
@@ -354,7 +392,7 @@ def fill_pdf(template_path, output_path, field_data):
     new_pdf = PdfReader(packet)
     writer = PdfWriter()
     
-    print("Unione layer...")
+    # print("Unione layer...")
     
     # Copia le pagine originali e unisci l'overlay
     for i, page in enumerate(reader.pages):
@@ -362,8 +400,6 @@ def fill_pdf(template_path, output_path, field_data):
             overlay_page = new_pdf.pages[i]
             page.merge_page(overlay_page)
         
-        # Opzionale: Rimuovi le annotazioni originali per evitare duplicati/conflitti
-        # (Se non le rimuoviamo, il campo vuoto rimane sotto al testo, che va bene)
         # Rimuoviamo i campi form originali per rendere il PDF "non editabile"
         if "/Annots" in page:
              del page["/Annots"]
@@ -378,87 +414,179 @@ def fill_pdf(template_path, output_path, field_data):
     with open(output_path, 'wb') as output_file:
         writer.write(output_file)
     
-    print(f"✓ File salvato con overlay grafico: {output_path.stat().st_size} bytes")
+    # print(f"✓ File salvato con overlay grafico: {output_path.stat().st_size} bytes")
 
-def main():
-    if len(sys.argv) < 2:
-        print("Uso: python fill_dnd_sheet.py <file.cah>")
-        print("Esempio: python fill_dnd_sheet.py input/Arkan.cah")
-        print("\nOppure elabora tutti i file .cah nella cartella input/:")
-        print("python fill_dnd_sheet.py --all")
-        return
+def process_cah_file(cah_file, output_dir):
+    """Logica core per processare un singolo file"""
+    cah_file = Path(cah_file)
+    output_dir = Path(output_dir)
     
     # Template PDF
-    template_pdf = Path("5E_CharacterSheet_Fillable.pdf")
+    template_pdf = get_resource_path("5E_CharacterSheet_Fillable.pdf")
+    if not template_pdf.exists():
+        raise FileNotFoundError(f"Template PDF non trovato: {template_pdf}")
+
+    char_data = load_character_data(cah_file)
+    char_info = extract_character_info(char_data)
     
+    # File di output
+    output_file = output_dir / f"{cah_file.stem}_sheet.pdf"
+    
+    fill_pdf(template_pdf, output_file, char_info)
+    
+    return {
+        'path': output_file,
+        'name': char_info.get('CharacterName', 'N/A'),
+        'class': char_info.get('ClassLevel', 'N/A')
+    }
+
+class DndConverterApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("D&D 5E Sheet Converter")
+        self.root.geometry("500x250")
+        self.root.resizable(False, False)
+
+        # Variabili
+        self.input_file = tk.StringVar()
+        self.output_dir = tk.StringVar()
+        self.status = tk.StringVar(value="Pronto")
+        
+        # Default output dir = current dir or output folder
+        default_out = Path.cwd() / "output"
+        if not default_out.exists():
+            default_out = Path.cwd()
+        self.output_dir.set(str(default_out))
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        # Frame Input
+        input_frame = tk.Frame(self.root, padx=10, pady=10)
+        input_frame.pack(fill="x")
+        
+        tk.Label(input_frame, text="File .CAH:", width=10, anchor="w").pack(side="left")
+        tk.Entry(input_frame, textvariable=self.input_file, state="readonly", width=40).pack(side="left", padx=5)
+        tk.Button(input_frame, text="Scegli", command=self.browse_input).pack(side="left")
+
+        # Frame Output
+        output_frame = tk.Frame(self.root, padx=10, pady=5)
+        output_frame.pack(fill="x")
+        
+        tk.Label(output_frame, text="Output:", width=10, anchor="w").pack(side="left")
+        tk.Entry(output_frame, textvariable=self.output_dir, state="readonly", width=40).pack(side="left", padx=5)
+        tk.Button(output_frame, text="Scegli", command=self.browse_output).pack(side="left")
+
+        # Action Button
+        action_frame = tk.Frame(self.root, padx=10, pady=20)
+        action_frame.pack(fill="x")
+        
+        self.convert_btn = tk.Button(action_frame, text="CONVERTI IN PDF", command=self.start_conversion, 
+                                     bg="#4CAF50", fg="white", font=("Helvetica", 12, "bold"), height=2)
+        self.convert_btn.pack(fill="x")
+
+        # Status Bar
+        status_frame = tk.Frame(self.root, padx=5, pady=5, relief=tk.SUNKEN, bd=1)
+        status_frame.pack(side="bottom", fill="x")
+        tk.Label(status_frame, textvariable=self.status, anchor="w").pack(fill="x")
+
+    def browse_input(self):
+        file_path = filedialog.askopenfilename(filetypes=[("File CAH", "*.cah"), ("Tutti i file", "*.*")])
+        if file_path:
+            self.input_file.set(file_path)
+
+    def browse_output(self):
+        dir_path = filedialog.askdirectory()
+        if dir_path:
+            self.output_dir.set(dir_path)
+
+    def start_conversion(self):
+        inp = self.input_file.get()
+        out = self.output_dir.get()
+        
+        if not inp:
+            messagebox.showwarning("Attenzione", "Seleziona un file .cah di input")
+            return
+        
+        if not out:
+            messagebox.showwarning("Attenzione", "Seleziona una cartella di destinazione")
+            return
+            
+        self.convert_btn.config(state="disabled")
+        self.status.set("Conversione in corso...")
+        
+        # Thread separato per non bloccare la GUI
+        threading.Thread(target=self.run_conversion_thread, args=(inp, out)).start()
+
+    def run_conversion_thread(self, inp, out):
+        try:
+            res = process_cah_file(inp, out)
+            self.status.set(f"Completato: {res['name']}")
+            messagebox.showinfo("Successo", f"Scheda creata con successo:\n{res['path']}")
+        except Exception as e:
+            self.status.set("Errore")
+            messagebox.showerror("Errore", str(e))
+        finally:
+            self.convert_btn.config(state="normal")
+
+def main_cli():
+    # Template PDF check early
+    template_pdf = get_resource_path("5E_CharacterSheet_Fillable.pdf")
     if not template_pdf.exists():
         print(f"Errore: Template PDF non trovato: {template_pdf}")
         return
-    
-    # Directory di input e output
+
     input_dir = Path("input")
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
     
-    # Lista dei file da processare
     files_to_process = []
     
     if sys.argv[1] == "--all":
-        # Elabora tutti i file .cah nella cartella input
         if not input_dir.exists():
             print(f"Errore: Cartella {input_dir} non trovata!")
             return
-        
         files_to_process = list(input_dir.glob("*.cah"))
-        if not files_to_process:
-            print(f"Nessun file .cah trovato in {input_dir}")
-            return
-        
-        print(f"Trovati {len(files_to_process)} file .cah da processare\n")
     else:
-        # Elabora un singolo file
         cah_file = Path(sys.argv[1])
-        
-        # Se il path non è assoluto e non esiste, prova nella cartella input
         if not cah_file.is_absolute() and not cah_file.exists():
             cah_file = input_dir / cah_file.name
-        
         if not cah_file.exists():
             print(f"Errore: File {cah_file} non trovato!")
             return
-        
         files_to_process = [cah_file]
     
-    # Processa ogni file
     for cah_file in files_to_process:
         try:
             print(f"{'='*50}")
-            print(f"Caricamento personaggio da {cah_file.name}...")
-            char_data = load_character_data(cah_file)
+            print(f"Caricamento {cah_file.name}...")
             
-            print("Estrazione informazioni...")
-            char_info = extract_character_info(char_data)
+            res = process_cah_file(cah_file, output_dir)
             
-            # File di output
-            output_file = output_dir / f"{cah_file.stem}_sheet.pdf"
-            
-            print(f"Compilazione PDF...")
-            fill_pdf(template_pdf, output_file, char_info)
-            
-            print(f"✓ Scheda creata con successo: {output_file}")
-            print(f"  Personaggio: {char_info.get('CharacterName', 'N/A')}")
-            print(f"  Classe/Livello: {char_info.get('ClassLevel', 'N/A')}")
-            print(f"  Razza: {char_info.get('Race ', 'N/A')}")
-            
-            # Info sugli incantesimi se presenti
-            if 'SpellcastingClass' in char_info:
-                print(f"  Incantatore: {char_info.get('SpellcastingClass', 'N/A')}")
-                print(f"  CD Incantesimi: {char_info.get('SpellSaveDC', 'N/A')}")
+            print(f"✓ Scheda creata: {res['path']}")
+            print(f"  Personaggio: {res['name']}")
+            print(f"  Classe: {res['class']}")
             print()
             
         except Exception as e:
-            print(f"✗ Errore durante l'elaborazione di {cah_file.name}: {e}")
+            print(f"✗ Errore: {e}")
             print()
+
+def main():
+    if len(sys.argv) > 1:
+        # Modalità CLI
+        try:
+            main_cli()
+        except Exception as e:
+            print(f"Errore critico: {e}")
+        finally:
+            if getattr(sys, 'frozen', False):
+                input("\nPremi INVIO per uscire...")
+    else:
+        # Modalità GUI
+        root = tk.Tk()
+        app = DndConverterApp(root)
+        root.mainloop()
 
 if __name__ == "__main__":
     main()
