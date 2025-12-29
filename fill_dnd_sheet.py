@@ -328,6 +328,63 @@ def extract_character_info(data):
                     
                     field_num = start_num + i
                     char_info[f'Spells {field_num}'] = spell_name
+
+    # --- INVENTARIO ED EQUIPAGGIAMENTO ---
+    inventory_items = []
+    gold_pieces = 0
+
+    # 1. Oggetti dal Background
+    bg_data = data.get('background', {})
+    if 'goldPieces' in bg_data:
+        gold_pieces += bg_data.get('goldPieces', 0)
+    
+    if 'equipment' in bg_data:
+        for item_entry in bg_data['equipment']:
+            if 'equipmentsModels' in item_entry:
+                for model in item_entry['equipmentsModels']:
+                    name = model.get('name', '')
+                    qty = model.get('number', 1)
+                    if name:
+                        inventory_items.append(f"{qty}x {name}" if qty > 1 else name)
+
+    # 2. Oggetti dalle Classi (Jobs)
+    for job in jobs:
+        if 'equipment' in job:
+             for item_entry in job['equipment']:
+                if 'equipmentsModels' in item_entry:
+                    for model in item_entry['equipmentsModels']:
+                        name = model.get('name', '')
+                        qty = model.get('number', 1)
+                        if name:
+                            inventory_items.append(f"{qty}x {name}" if qty > 1 else name)
+
+    # 3. Inventario generale (Inventory / Items)
+    # Prova chiavi comuni per liste extra
+    extra_lists = [data.get('inventory', []), data.get('items', [])]
+    for lst in extra_lists:
+        if isinstance(lst, list):
+            for item in lst:
+                # Struttura potrebbe variare: "name" diretto o nidificato
+                if 'equipmentsModels' in item:
+                     for model in item['equipmentsModels']:
+                        name = model.get('name', '')
+                        qty = model.get('number', 1)
+                        if name:
+                            inventory_items.append(f"{qty}x {name}" if qty > 1 else name)
+                elif 'name' in item: # Struttura piatta semplice
+                     name = item.get('name', '')
+                     qty = item.get('count', item.get('quantity', 1))
+                     if name:
+                            inventory_items.append(f"{qty}x {name}" if qty > 1 else name)
+
+    # Formatta la lista come testo multiriga
+    # Rimuovi duplicati mantenendo l'ordine o aggregando? Per semplicità lista piatta.
+    if inventory_items:
+        char_info['Equipment'] = "\n".join(inventory_items)
+    
+    # Monete
+    if gold_pieces > 0:
+        char_info['GP'] = str(gold_pieces)
     
     return char_info
 
